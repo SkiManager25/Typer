@@ -16,8 +16,6 @@ class Betting(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ---------- ADMIN: dodawanie meczu ----------
-
     @app_commands.command(name="dodajmecz", description="[Admin] Dodaj mecz do obstawiania")
     @app_commands.describe(
         gracz_a="Imię i nazwisko gracza A",
@@ -36,7 +34,8 @@ class Betting(commands.Cog):
             description=(
                 f"**{gracz_a}** (ranking {ranking_a}) — kurs **{odds_a}**\n"
                 f"**{gracz_b}** (ranking {ranking_b}) — kurs **{odds_b}**\n\n"
-                f"Obstaw: `/typuj mecz:{match_id} gracz:{gracz_a} kwota:100`"
+                f"Obstaw pojedynczo: `/typuj mecz:{match_id} gracz:{gracz_a} kwota:100`\n"
+                f"Lub dodaj do kuponu: `/kupon_dodaj mecz:{match_id} gracz:{gracz_a}`"
             ),
             color=discord.Color.green(),
         )
@@ -58,13 +57,11 @@ class Betting(commands.Cog):
         text = "```\n" + "\n".join(lines) + "\n```"
         await interaction.response.send_message(f"📋 **Otwarte mecze**\n{text}")
 
-    # ---------- USER: obstawianie ----------
-
     @app_commands.command(name="typuj", description="Postaw zakład na mecz")
     @app_commands.describe(
         mecz="ID meczu (zobacz /mecze)",
         gracz="Imię gracza, na którego stawiasz (dokładnie jak w /mecze)",
-        kwota="Ile punktów stawiasz",
+        kwota="Ile stawiasz",
     )
     async def typuj(self, interaction: discord.Interaction, mecz: int, gracz: str, kwota: int):
         if kwota <= 0:
@@ -90,7 +87,7 @@ class Betting(commands.Cog):
         balance = await db.get_or_create_user(interaction.user.id, str(interaction.user))
         if balance < kwota:
             await interaction.response.send_message(
-                f"Za mało punktów. Masz {balance}, chcesz postawić {kwota}.", ephemeral=True
+                f"Za mało kasy. Masz ${balance:,}, chcesz postawić ${kwota:,}.", ephemeral=True
             )
             return
 
@@ -99,11 +96,9 @@ class Betting(commands.Cog):
 
         potential = round(kwota * picked_odds)
         await interaction.response.send_message(
-            f"✅ Postawiłeś **{kwota}** pkt na **{gracz}** @ {picked_odds}. "
-            f"Możliwa wygrana: **{potential}** pkt."
+            f"✅ Postawiłeś **${kwota:,}** na **{gracz}** @ {picked_odds}. "
+            f"Możliwa wygrana: **${potential:,}**."
         )
-
-    # ---------- ADMIN: rozstrzyganie ----------
 
     @app_commands.command(name="rozstrzygnij", description="[Admin] Rozstrzygnij mecz i wypłać wygrane")
     @app_commands.describe(mecz="ID meczu", zwyciezca="Imię zwycięzcy (dokładnie jak w /mecze)")
@@ -120,13 +115,17 @@ class Betting(commands.Cog):
             return
 
         await db.close_match(mecz)
-        results = await db.settle_match(mecz, zwyciezca)
+        results, slip_results = await db.settle_match(mecz, zwyciezca)
 
         wins = sum(1 for r in results if r[1])
-        await interaction.response.send_message(
+        text = (
             f"🏁 Mecz #{mecz} rozstrzygnięty — zwycięzca: **{zwyciezca}**\n"
-            f"Wypłacono wygrane {wins} z {len(results)} zakładów."
+            f"Pojedyncze zakłady: wypłacono {wins} z {len(results)}."
         )
+        if slip_results:
+            slip_wins = sum(1 for r in slip_results if r[2])
+            text += f"\nKupony rozliczone w tym kroku: {slip_wins} wygranych z {len(slip_results)}."
+        await interaction.response.send_message(text)
 
 
 async def setup(bot: commands.Bot):
