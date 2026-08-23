@@ -5,7 +5,7 @@ from discord.ext import commands
 
 from database import init_db
 
-TOKEN = os.getenv("DISCORD_TOKEN")  # ustaw zmienną środowiskową, nigdy nie wklejaj tokena w kod
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -26,6 +26,7 @@ async def main():
     async with bot:
         await bot.load_extension("cogs.economy")
         await bot.load_extension("cogs.betting")
+        await bot.load_extension("cogs.kupony")
         await bot.start(TOKEN)
 
 
