@@ -1,4 +1,5 @@
 import os
+import aiohttp
 
 import discord
 from discord import app_commands
@@ -75,6 +76,73 @@ class Betting(commands.Cog):
 
     # ---------- ADMIN: dodawanie meczu ----------
 
+    @app_commands.command(name="pobierz_betclic", description="[Admin] Pobierz mecze tenisa z Betclic i dodaj automatycznie")
+    @app_commands.describe(limit="Ile meczów max pobrać (domyślnie 10)")
+    @is_authorized()
+    @is_correct_channel()
+    async def pobierz_betclic(self, interaction: discord.Interaction, limit: int = 10):
+        await interaction.response.defer()
+
+        url = "https://api.betclic.com/v2/sports/2/events"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json"
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=10) as resp:
+                    if resp.status != 200:
+                        await interaction.followup.send("❌ Błąd połączenia z API Betclic.")
+                        return
+                    data = await resp.json()
+        except Exception as e:
+            await interaction.followup.send(f"❌ Wystąpił błąd: {e}")
+            return
+
+        dodane = 0
+        pominiete = 0
+
+        for event in data:
+            if dodane >= limit:
+                break
+
+            grouped = event.get('grouped_markets', [])
+            if not grouped:
+                continue
+
+            markets = grouped[0].get('markets', [])
+            if not markets:
+                continue
+
+            selections = markets[0].get('selections', [])
+            if len(selections) != 2:
+                continue
+
+            gracz_a = selections[0].get('name')
+            kurs_a = float(selections[0].get('odds', 0))
+            gracz_b = selections[1].get('name')
+            kurs_b = float(selections[1].get('odds', 0))
+
+            if not gracz_a or not gracz_b or kurs_a < 1.01 or kurs_b < 1.01:
+                continue
+
+            existing = await db.find_open_match_by_players(gracz_a, gracz_b)
+            if existing is not None:
+                pominiete += 1
+                continue
+
+            await db.create_match(gracz_a, 0, gracz_b, 0, round(kurs_a, 2), round(kurs_b, 2))
+            dodane += 1
+
+        embed = discord.Embed(
+            title="🤖 Betclic — Pobieranie meczów",
+            description=f"✅ Dodano nowych meczów: **{dodane}**\nℹ️ Pominięto (duplikaty): **{pominiete}**",
+            color=discord.Color.from_rgb(46, 204, 113)
+        )
+        embed.set_footer(text="Mecze są gotowe do obstawiania w /mecze")
+        await interaction.followup.send(embed=embed)
+
     @app_commands.command(name="dodajmecz", description="[Admin] Dodaj mecz do obstawiania")
     @app_commands.describe(
         gracz_a="Imię i nazwisko gracza A",
@@ -95,8 +163,6 @@ class Betting(commands.Cog):
             await interaction.response.send_message("format_setow musi być 3 albo 5.", ephemeral=True)
             return
 
-        # sprawdz czy taki mecz (ci sami dwaj gracze) juz nie jest otwarty -
-        # zapobiega duplikatom gdy komenda "wygasla" i ktos probuje ponownie
         existing = await db.find_open_match_by_players(gracz_a, gracz_b)
         if existing is not None:
             already_has_scores = bool(existing["best_of"])
@@ -207,7 +273,6 @@ class Betting(commands.Cog):
         await db.upsert_score_market(mecz, label, round(kurs, 2))
 
         if match["best_of"] is None:
-            # oznacz mecz jako majacy niestandardowe (recznie dodane) zaklady setowe
             await db.set_match_best_of(mecz, -1)
 
         akcja = "Zaktualizowano" if existing_odds is not None else "Dodano"
@@ -226,7 +291,7 @@ class Betting(commands.Cog):
             await interaction.response.send_message("📋 Brak otwartych meczów w tej chwili.")
             return
 
-        LIMIT = 24  # Discord pozwala na max 25 pol w embedzie
+        LIMIT = 24
         shown = matches[:LIMIT]
 
         embed = discord.Embed(
@@ -486,7 +551,6 @@ class Betting(commands.Cog):
                     inline=True,
                 )
 
-        # gratulacje dla zwyciezcow (pingi)
         winner_ids = {r[0] for r in results if r[1]}
         winner_ids |= {r[0] for r in slip_results if r[2]}
         winner_ids |= {r[0] for r in score_results if r[1]}
