@@ -451,6 +451,23 @@ async def create_score_markets(match_id: int, markets: list[tuple[str, float]]):
         await db.commit()
 
 
+async def upsert_score_market(match_id: int, label: str, odds: float):
+    """Dodaje nowy wynik setowy albo nadpisuje kurs, jesli taka etykieta juz istnieje."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id FROM score_markets WHERE match_id = ? AND label = ?", (match_id, label)
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            await db.execute("UPDATE score_markets SET odds = ? WHERE id = ?", (odds, row[0]))
+        else:
+            await db.execute(
+                "INSERT INTO score_markets (match_id, label, odds) VALUES (?, ?, ?)",
+                (match_id, label, odds),
+            )
+        await db.commit()
+
+
 async def get_score_markets(match_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
