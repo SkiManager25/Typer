@@ -1,3 +1,5 @@
+import os
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -6,16 +8,34 @@ import database as db
 from odds import calculate_odds
 from currency import format_money
 
+# ID Discorda osob uprawnionych do dodawania/rozstrzygania meczy.
+# Ustawiane zmienna srodowiskowa MATCH_ADMIN_IDS, oddzielone przecinkami, np:
+# MATCH_ADMIN_IDS=123456789012345678,987654321098765432
+_raw_ids = os.getenv("MATCH_ADMIN_IDS", "")
+AUTHORIZED_USER_IDS = {int(x.strip()) for x in _raw_ids.split(",") if x.strip().isdigit()}
 
-def is_admin():
+
+def is_authorized():
     async def predicate(interaction: discord.Interaction) -> bool:
-        return interaction.user.guild_permissions.administrator
+        if not AUTHORIZED_USER_IDS:
+            # jesli nikt nie zostal wskazany, awaryjnie zostaje wymog Administratora
+            return interaction.user.guild_permissions.administrator
+        return interaction.user.id in AUTHORIZED_USER_IDS
     return app_commands.check(predicate)
 
 
 class Betting(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.CheckFailure):
+            await interaction.response.send_message(
+                "⛔ Nie masz uprawnień do tej komendy — może jej użyć tylko wyznaczona osoba.",
+                ephemeral=True,
+            )
+        else:
+            raise error
 
     # ---------- ADMIN: dodawanie meczu ----------
 
@@ -28,7 +48,7 @@ class Betting(commands.Cog):
         kurs_a="Opcjonalnie: podaj kurs gracza A ręcznie (jeśli pominiesz, policzy się automatycznie z rankingu)",
         kurs_b="Opcjonalnie: podaj kurs gracza B ręcznie (musisz podać oba kursy razem)",
     )
-    @is_admin()
+    @is_authorized()
     async def dodajmecz(self, interaction: discord.Interaction, gracz_a: str, ranking_a: int,
                          gracz_b: str, ranking_b: int,
                          kurs_a: float = None, kurs_b: float = None):
@@ -130,7 +150,7 @@ class Betting(commands.Cog):
 
     @app_commands.command(name="rozstrzygnij", description="[Admin] Rozstrzygnij mecz i wypłać wygrane")
     @app_commands.describe(mecz="ID meczu", zwyciezca="Imię zwycięzcy (dokładnie jak w /mecze)")
-    @is_admin()
+    @is_authorized()
     async def rozstrzygnij(self, interaction: discord.Interaction, mecz: int, zwyciezca: str):
         match = await db.get_match(mecz)
         if match is None:
