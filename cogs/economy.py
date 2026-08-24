@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database as db
+from currency import format_money
 
 
 class Economy(commands.Cog):
@@ -13,7 +14,7 @@ class Economy(commands.Cog):
     async def saldo(self, interaction: discord.Interaction):
         balance = await db.get_or_create_user(interaction.user.id, str(interaction.user))
         await interaction.response.send_message(
-            f"💰 Twoje saldo: **${balance:,}**"
+            f"💰 Twoje saldo: **{format_money(balance)}**"
         )
 
     @app_commands.command(name="ranking_graczy", description="Ranking najbogatszych typerów")
@@ -25,7 +26,7 @@ class Economy(commands.Cog):
 
         lines = []
         for i, row in enumerate(rows, start=1):
-            lines.append(f"{i}. {row['username']} — ${row['balance']:,}")
+            lines.append(f"{i}. {row['username']} — {format_money(row['balance'])}")
 
         text = "```\n" + "\n".join(lines) + "\n```"
         await interaction.response.send_message(f"🏆 **Ranking typerów**\n{text}")
@@ -42,12 +43,12 @@ class Economy(commands.Cog):
             if b["status"] != "settled":
                 status = "⏳ w toku"
             elif b["player_choice"] == b["winner"]:
-                status = f"✅ wygrana (${int(round(b['amount'] * b['odds'])):,})"
+                status = f"✅ wygrana ({format_money(int(round(b['amount'] * b['odds'])))})"
             else:
                 status = "❌ przegrana"
             lines.append(
                 f"#{b['match_id']} {b['player_a']} vs {b['player_b']} — "
-                f"typ: {b['player_choice']} @ {b['odds']} — ${b['amount']:,} — {status}"
+                f"typ: {b['player_choice']} @ {b['odds']} — {format_money(b['amount'])} — {status}"
             )
 
         text = "```\n" + "\n".join(lines) + "\n```"
