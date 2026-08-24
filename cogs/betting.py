@@ -299,7 +299,7 @@ class Betting(commands.Cog):
             await interaction.response.send_message("📋 Brak otwartych meczów w tej chwili.")
             return
 
-        LIMIT = 24
+        LIMIT = 48
         shown = matches[:LIMIT]
 
         embed = discord.Embed(
