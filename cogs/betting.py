@@ -74,7 +74,7 @@ class Betting(commands.Cog):
         else:
             raise error
 
-    # ---------- ADMIN: dodawanie meczu ----------
+    # ---------- ADMIN: pobieranie meczow z Betclic ----------
 
     @app_commands.command(name="pobierz_betclic", description="[Admin] Pobierz mecze tenisa z Betclic i dodaj automatycznie")
     @app_commands.describe(limit="Ile meczów max pobrać (domyślnie 10)")
@@ -83,27 +83,33 @@ class Betting(commands.Cog):
     async def pobierz_betclic(self, interaction: discord.Interaction, limit: int = 10):
         await interaction.response.defer()
 
-        url = "https://api.betclic.com/v2/sports/2/events"
+        url = "https://sports-api.betclic.pl/api/v2/sports/2/events"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7"
         }
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=10) as resp:
                     if resp.status != 200:
-                        await interaction.followup.send("❌ Błąd połączenia z API Betclic.")
+                        await interaction.followup.send(f"❌ Błąd połączenia z API Betclic (Status HTTP: {resp.status}).")
                         return
                     data = await resp.json()
         except Exception as e:
-            await interaction.followup.send(f"❌ Wystąpił błąd: {e}")
+            await interaction.followup.send(f"❌ Wystąpił błąd podczas połączenia: {e}")
+            return
+
+        events = data if isinstance(data, list) else data.get("events", [])
+        if not events:
+            await interaction.followup.send("ℹ️ Nie znaleziono żadnych nadchodzących meczów tenisa w API Betclic.")
             return
 
         dodane = 0
         pominiete = 0
 
-        for event in data:
+        for event in events:
             if dodane >= limit:
                 break
 
@@ -111,7 +117,7 @@ class Betting(commands.Cog):
             if not grouped:
                 continue
 
-            markets = grouped[0].get('markets', [])
+            markets = grouped[0].get('markets', []) if len(grouped) > 0 else []
             if not markets:
                 continue
 
@@ -142,6 +148,8 @@ class Betting(commands.Cog):
         )
         embed.set_footer(text="Mecze są gotowe do obstawiania w /mecze")
         await interaction.followup.send(embed=embed)
+
+    # ---------- ADMIN: dodawanie meczu ----------
 
     @app_commands.command(name="dodajmecz", description="[Admin] Dodaj mecz do obstawiania")
     @app_commands.describe(
