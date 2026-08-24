@@ -149,6 +149,90 @@ class Betting(commands.Cog):
         embed.set_footer(text="Mecze są gotowe do obstawiania w /mecze")
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(name="dodaj_tio", description="[Admin] Pobierz mecze tenisa Togliatti (TIO) z Betclic")
+    @app_commands.describe(
+        limit="Ile meczów max pobrać (domyślnie 10)",
+        fraza="Szukana fraza turnieju (domyślnie: Togliatti)"
+    )
+    @is_authorized()
+    @is_correct_channel()
+    async def dodaj_tio(self, interaction: discord.Interaction, limit: int = 10, fraza: str = "Togliatti"):
+        await interaction.response.defer()
+
+        url = "https://sports-api.betclic.pl/api/v2/sports/2/events"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=10) as resp:
+                    if resp.status != 200:
+                        await interaction.followup.send(f"❌ Błąd połączenia z API Betclic (Status HTTP: {resp.status}).")
+                        return
+                    data = await resp.json()
+        except Exception as e:
+            await interaction.followup.send(f"❌ Wystąpił błąd podczas połączenia: {e}")
+            return
+
+        events = data if isinstance(data, list) else data.get("events", [])
+        
+        # Filtrowanie wydarzeń pod kątem turnieju Togliatti / TIO
+        tio_events = [
+            e for e in events 
+            if fraza.lower() in e.get("name", "").lower() 
+            or fraza.lower() in e.get("competition", {}).get("name", "").lower()
+        ]
+
+        if not tio_events:
+            await interaction.followup.send(f"ℹ️ Nie znaleziono żadnych nadchodzących meczów dla frazy **{fraza}**.")
+            return
+
+        dodane = 0
+        pominiete = 0
+
+        for event in tio_events:
+            if dodane >= limit:
+                break
+
+            grouped = event.get('grouped_markets', [])
+            if not grouped:
+                continue
+
+            markets = grouped[0].get('markets', []) if len(grouped) > 0 else []
+            if not markets:
+                continue
+
+            selections = markets[0].get('selections', [])
+            if len(selections) != 2:
+                continue
+
+            gracz_a = selections[0].get('name')
+            kurs_a = float(selections[0].get('odds', 0))
+            gracz_b = selections[1].get('name')
+            kurs_b = float(selections[1].get('odds', 0))
+
+            if not gracz_a or not gracz_b or kurs_a < 1.01 or kurs_b < 1.01:
+                continue
+
+            existing = await db.find_open_match_by_players(gracz_a, gracz_b)
+            if existing is not None:
+                pominiete += 1
+                continue
+
+            await db.create_match(gracz_a, 0, gracz_b, 0, round(kurs_a, 2), round(kurs_b, 2))
+            dodane += 1
+
+        embed = discord.Embed(
+            title=f"🎾 Betclic — Pobieranie meczów {fraza.upper()}",
+            description=f"✅ Dodano nowych meczów: **{dodane}**\nℹ️ Pominięto (duplikaty): **{pominiete}**",
+            color=discord.Color.from_rgb(46, 204, 113)
+        )
+        embed.set_footer(text="Mecze są gotowe do obstawiania w /mecze")
+        await interaction.followup.send(embed=embed)
+
     # ---------- ADMIN: dodawanie meczu ----------
 
     @app_commands.command(name="dodajmecz", description="[Admin] Dodaj mecz do obstawiania")
