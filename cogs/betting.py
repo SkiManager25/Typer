@@ -88,6 +88,35 @@ class Betting(commands.Cog):
             await interaction.response.send_message("format_setow musi być 3 albo 5.", ephemeral=True)
             return
 
+        # sprawdz czy taki mecz (ci sami dwaj gracze) juz nie jest otwarty -
+        # zapobiega duplikatom gdy komenda "wygasla" i ktos probuje ponownie
+        existing = await db.find_open_match_by_players(gracz_a, gracz_b)
+        if existing is not None:
+            already_has_scores = bool(existing["best_of"])
+            if format_setow is not None and not already_has_scores:
+                await db.set_match_best_of(existing["id"], format_setow)
+                markets = calculate_score_markets(
+                    existing["odds_a"], existing["odds_b"], existing["player_a"], existing["player_b"], format_setow
+                )
+                await db.create_score_markets(existing["id"], markets)
+                dopisek = "\n\n➕ Dołożono zakłady na wynik setowy do tego meczu."
+            elif format_setow is not None and already_has_scores:
+                dopisek = "\n\n_Ten mecz już ma zakłady na wynik setowy._"
+            else:
+                dopisek = ""
+
+            embed = discord.Embed(
+                title=f"ℹ️  Ten mecz już istnieje — Mecz #{existing['id']}",
+                description=(
+                    f"**{existing['player_a']}** @ {existing['odds_a']}  vs  "
+                    f"**{existing['player_b']}** @ {existing['odds_b']}\n"
+                    f"Nie tworzę duplikatu — używaj tego meczu.{dopisek}"
+                ),
+                color=discord.Color.from_rgb(52, 152, 219),
+            )
+            await interaction.response.send_message(embed=embed)
+            return
+
         if kurs_a is not None and kurs_b is not None:
             if kurs_a < 1.01 or kurs_b < 1.01:
                 await interaction.response.send_message("Kursy muszą być co najmniej 1.01.", ephemeral=True)
