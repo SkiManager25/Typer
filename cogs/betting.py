@@ -226,16 +226,53 @@ class Betting(commands.Cog):
             await interaction.response.send_message("📋 Brak otwartych meczów w tej chwili.")
             return
 
+        LIMIT = 24  # Discord pozwala na max 25 pol w embedzie
+        shown = matches[:LIMIT]
+
         embed = discord.Embed(
             title="📋  Otwarte mecze",
             description=f"Aktualnie **{len(matches)}** mecz(e/ów) czeka na typy.",
             color=discord.Color.from_rgb(52, 152, 219),
         )
-        for m in matches:
+        for m in shown:
             value = f"🎾 **{m['player_a']}** @{m['odds_a']}  vs  **{m['player_b']}** @{m['odds_b']}"
             if m["best_of"]:
                 value += f"\n_wynik setowy: `/typy_setowe mecz:{m['id']}`_"
             embed.add_field(name=f"Mecz #{m['id']}", value=value, inline=False)
+
+        if len(matches) > LIMIT:
+            embed.set_footer(
+                text=f"Pokazano {LIMIT} z {len(matches)}. Posprzątaj stare/testowe mecze przez /anuluj_mecz."
+            )
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="anuluj_mecz", description="[Admin] Zamknij mecz BEZ rozstrzygania (np. duplikat/pomyłka) i zwróć stawki")
+    @app_commands.describe(mecz="ID meczu do anulowania")
+    @is_authorized()
+    async def anuluj_mecz(self, interaction: discord.Interaction, mecz: int):
+        match = await db.get_match(mecz)
+        if match is None:
+            await interaction.response.send_message("Nie ma meczu o takim ID.", ephemeral=True)
+            return
+        if match["status"] != "open":
+            await interaction.response.send_message("Ten mecz nie jest już otwarty.", ephemeral=True)
+            return
+
+        summary = await db.cancel_match(mecz)
+
+        embed = discord.Embed(
+            title=f"🗑️  Mecz #{mecz} anulowany",
+            description=f"{match['player_a']} vs {match['player_b']}",
+            color=discord.Color.from_rgb(149, 165, 166),
+        )
+        embed.add_field(
+            name="Zwrócone stawki",
+            value=(
+                f"Pojedyncze: {summary['bets']}\n"
+                f"Setowe: {summary['score_bets']}\n"
+                f"Kupony: {summary['slips']}"
+            ),
+        )
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="historia_meczy", description="Ostatnio rozstrzygnięte mecze")
