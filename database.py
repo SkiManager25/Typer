@@ -1,3 +1,7 @@
+"""
+Moduł bazy danych dla bota typerskiego.
+Używa SQLite (aiosqlite) - jeden plik bazy, zero konfiguracji.
+"""
 import aiosqlite
 
 DB_PATH = "typerka.db"
@@ -185,6 +189,66 @@ async def close_match(match_id: int):
             "UPDATE matches SET status = 'closed' WHERE id = ?", (match_id,)
         )
         await db.commit()
+
+
+async def cancel_match(match_id: int) -> dict:
+    """Zamyka mecz BEZ rozstrzygania (np. duplikat/pomylka testowa) i zwraca
+    wszystkie postawione na niego stawki (pojedyncze zaklady, zaklady setowe,
+    oraz kupony ktore go zawieraly)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        await db.execute("UPDATE matches SET status = 'closed' WHERE id = ?", (match_id,))
+
+        refunded_bets = 0
+        async with db.execute(
+            "SELECT * FROM bets WHERE match_id = ? AND settled = 0", (match_id,)
+        ) as cur:
+            bets = await cur.fetchall()
+        for bet in bets:
+            await db.execute(
+                "UPDATE users SET balance = balance + ? WHERE discord_id = ?",
+                (bet["amount"], bet["discord_id"]),
+            )
+            await db.execute("UPDATE bets SET settled = 1 WHERE id = ?", (bet["id"],))
+            refunded_bets += 1
+
+        refunded_score_bets = 0
+        async with db.execute(
+            "SELECT * FROM score_bets WHERE match_id = ? AND settled = 0", (match_id,)
+        ) as cur:
+            score_bets = await cur.fetchall()
+        for bet in score_bets:
+            await db.execute(
+                "UPDATE users SET balance = balance + ? WHERE discord_id = ?",
+                (bet["amount"], bet["discord_id"]),
+            )
+            await db.execute("UPDATE score_bets SET settled = 1 WHERE id = ?", (bet["id"],))
+            refunded_score_bets += 1
+
+        refunded_slips = 0
+        async with db.execute(
+            """SELECT DISTINCT slips.id, slips.discord_id, slips.stake FROM slip_legs
+               JOIN slips ON slip_legs.slip_id = slips.id
+               WHERE slip_legs.match_id = ? AND slips.status = 'placed'""",
+            (match_id,),
+        ) as cur:
+            affected_slips = await cur.fetchall()
+        for slip in affected_slips:
+            await db.execute(
+                "UPDATE users SET balance = balance + ? WHERE discord_id = ?",
+                (slip["stake"], slip["discord_id"]),
+            )
+            await db.execute("UPDATE slips SET status = 'settled' WHERE id = ?", (slip["id"],))
+            refunded_slips += 1
+
+        await db.commit()
+
+    return {
+        "bets": refunded_bets,
+        "score_bets": refunded_score_bets,
+        "slips": refunded_slips,
+    }
 
 
 async def place_bet(match_id: int, discord_id: int, player_choice: str,
