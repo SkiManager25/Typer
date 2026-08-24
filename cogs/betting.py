@@ -8,9 +8,6 @@ import database as db
 from odds import calculate_odds
 from currency import format_money
 
-# ID Discorda osob uprawnionych do dodawania/rozstrzygania meczy.
-# Ustawiane zmienna srodowiskowa MATCH_ADMIN_IDS, oddzielone przecinkami, np:
-# MATCH_ADMIN_IDS=123456789012345678,987654321098765432
 _raw_ids = os.getenv("MATCH_ADMIN_IDS", "")
 AUTHORIZED_USER_IDS = {int(x.strip()) for x in _raw_ids.split(",") if x.strip().isdigit()}
 
@@ -18,7 +15,6 @@ AUTHORIZED_USER_IDS = {int(x.strip()) for x in _raw_ids.split(",") if x.strip().
 def is_authorized():
     async def predicate(interaction: discord.Interaction) -> bool:
         if not AUTHORIZED_USER_IDS:
-            # jesli nikt nie zostal wskazany, awaryjnie zostaje wymog Administratora
             return interaction.user.guild_permissions.administrator
         return interaction.user.id in AUTHORIZED_USER_IDS
     return app_commands.check(predicate)
@@ -37,21 +33,19 @@ class Betting(commands.Cog):
         else:
             raise error
 
-    # ---------- ADMIN: dodawanie meczu ----------
-
     @app_commands.command(name="dodajmecz", description="[Admin] Dodaj mecz do obstawiania")
     @app_commands.describe(
         gracz_a="Imię i nazwisko gracza A",
-        ranking_a="Aktualny ranking ATP/WTA gracza A (liczba)",
         gracz_b="Imię i nazwisko gracza B",
-        ranking_b="Aktualny ranking ATP/WTA gracza B (liczba)",
-        kurs_a="Opcjonalnie: podaj kurs gracza A ręcznie (jeśli pominiesz, policzy się automatycznie z rankingu)",
-        kurs_b="Opcjonalnie: podaj kurs gracza B ręcznie (musisz podać oba kursy razem)",
+        kurs_a="Kurs gracza A — podaj ręcznie jeśli chcesz ustawić kurs sam",
+        kurs_b="Kurs gracza B — podaj ręcznie jeśli chcesz ustawić kurs sam",
+        ranking_a="Opcjonalnie: ranking ATP/WTA gracza A (potrzebny tylko jeśli NIE podajesz kursów ręcznie)",
+        ranking_b="Opcjonalnie: ranking ATP/WTA gracza B (potrzebny tylko jeśli NIE podajesz kursów ręcznie)",
     )
     @is_authorized()
-    async def dodajmecz(self, interaction: discord.Interaction, gracz_a: str, ranking_a: int,
-                         gracz_b: str, ranking_b: int,
-                         kurs_a: float = None, kurs_b: float = None):
+    async def dodajmecz(self, interaction: discord.Interaction, gracz_a: str, gracz_b: str,
+                         kurs_a: float = None, kurs_b: float = None,
+                         ranking_a: int = None, ranking_b: int = None):
         if kurs_a is not None and kurs_b is not None:
             if kurs_a < 1.01 or kurs_b < 1.01:
                 await interaction.response.send_message("Kursy muszą być co najmniej 1.01.", ephemeral=True)
@@ -64,23 +58,40 @@ class Betting(commands.Cog):
                 ephemeral=True,
             )
             return
-        else:
+        elif ranking_a is not None and ranking_b is not None:
             odds_a, odds_b = calculate_odds(ranking_a, ranking_b)
             recznie = False
+        else:
+            await interaction.response.send_message(
+                "Podaj albo oba kursy (kurs_a + kurs_b), albo oba rankingi (ranking_a + ranking_b), "
+                "żeby kurs policzył się automatycznie.",
+                ephemeral=True,
+            )
+            return
 
-        match_id = await db.create_match(gracz_a, ranking_a, gracz_b, ranking_b, odds_a, odds_b)
+        match_id = await db.create_match(
+            gracz_a, ranking_a or 0, gracz_b, ranking_b or 0, odds_a, odds_b
+        )
 
-        source_note = "kursy ustawione ręcznie" if recznie else "kursy liczone automatycznie z rankingu"
+        rank_line_a = f" (ranking {ranking_a})" if ranking_a else ""
+        rank_line_b = f" (ranking {ranking_b})" if ranking_b else ""
+        source_note = "🎯 kursy ustawione ręcznie" if recznie else "📊 kursy liczone automatycznie z rankingu"
+
         embed = discord.Embed(
-            title=f"🎾 Mecz #{match_id} otwarty do obstawiania",
-            description=(
-                f"**{gracz_a}** (ranking {ranking_a}) — kurs **{odds_a}**\n"
-                f"**{gracz_b}** (ranking {ranking_b}) — kurs **{odds_b}**\n"
-                f"_({source_note})_\n\n"
-                f"Obstaw pojedynczo: `/typuj mecz:{match_id} gracz:{gracz_a} kwota:100`\n"
-                f"Lub dodaj do kuponu: `/kupon_dodaj mecz:{match_id} gracz:{gracz_a}`"
+            title=f"🎾  Mecz #{match_id}",
+            description="Nowy mecz otwarty do obstawiania!",
+            color=discord.Color.from_rgb(46, 204, 113),
+        )
+        embed.add_field(name=f"🅰️  {gracz_a}{rank_line_a}", value=f"kurs **{odds_a}**", inline=True)
+        embed.add_field(name=f"🅱️  {gracz_b}{rank_line_b}", value=f"kurs **{odds_b}**", inline=True)
+        embed.add_field(name="\u200b", value=f"_{source_note}_", inline=False)
+        embed.add_field(
+            name="Jak obstawić",
+            value=(
+                f"Pojedynczo: `/typuj mecz:{match_id} gracz:{gracz_a} kwota:100`\n"
+                f"Do kuponu: `/kupon_dodaj mecz:{match_id} gracz:{gracz_a}`"
             ),
-            color=discord.Color.green(),
+            inline=False,
         )
         await interaction.response.send_message(embed=embed)
 
@@ -88,17 +99,21 @@ class Betting(commands.Cog):
     async def mecze(self, interaction: discord.Interaction):
         matches = await db.get_open_matches()
         if not matches:
-            await interaction.response.send_message("Brak otwartych meczów.")
+            await interaction.response.send_message("📋 Brak otwartych meczów w tej chwili.")
             return
 
-        lines = []
+        embed = discord.Embed(
+            title="📋  Otwarte mecze",
+            description=f"Aktualnie **{len(matches)}** mecz(e/ów) czeka na typy.",
+            color=discord.Color.from_rgb(52, 152, 219),
+        )
         for m in matches:
-            lines.append(
-                f"#{m['id']}: {m['player_a']} (@{m['odds_a']}) vs "
-                f"{m['player_b']} (@{m['odds_b']})"
+            embed.add_field(
+                name=f"Mecz #{m['id']}",
+                value=f"🎾 **{m['player_a']}** @{m['odds_a']}  vs  **{m['player_b']}** @{m['odds_b']}",
+                inline=False,
             )
-        text = "```\n" + "\n".join(lines) + "\n```"
-        await interaction.response.send_message(f"📋 **Otwarte mecze**\n{text}")
+        await interaction.response.send_message(embed=embed)
 
     # ---------- USER: obstawianie ----------
 
@@ -141,10 +156,14 @@ class Betting(commands.Cog):
         await db.place_bet(mecz, interaction.user.id, gracz, kwota, picked_odds)
 
         potential = round(kwota * picked_odds)
-        await interaction.response.send_message(
-            f"✅ Postawiłeś **{format_money(kwota)}** na **{gracz}** @ {picked_odds}. "
-            f"Możliwa wygrana: **{format_money(potential)}**."
+        embed = discord.Embed(
+            title="✅  Zakład przyjęty",
+            color=discord.Color.from_rgb(46, 204, 113),
         )
+        embed.add_field(name="Typ", value=f"**{gracz}** @ {picked_odds}", inline=True)
+        embed.add_field(name="Stawka", value=format_money(kwota), inline=True)
+        embed.add_field(name="Możliwa wygrana", value=f"**{format_money(potential)}**", inline=True)
+        await interaction.response.send_message(embed=embed)
 
     # ---------- ADMIN: rozstrzyganie ----------
 
@@ -166,14 +185,24 @@ class Betting(commands.Cog):
         results, slip_results = await db.settle_match(mecz, zwyciezca)
 
         wins = sum(1 for r in results if r[1])
-        text = (
-            f"🏁 Mecz #{mecz} rozstrzygnięty — zwycięzca: **{zwyciezca}**\n"
-            f"Pojedyncze zakłady: wypłacono {wins} z {len(results)}."
+        embed = discord.Embed(
+            title=f"🏁  Mecz #{mecz} rozstrzygnięty",
+            description=f"🏆 Zwycięzca: **{zwyciezca}**",
+            color=discord.Color.from_rgb(241, 196, 15),
+        )
+        embed.add_field(
+            name="Pojedyncze zakłady",
+            value=f"Wypłacono {wins} z {len(results)}",
+            inline=True,
         )
         if slip_results:
             slip_wins = sum(1 for r in slip_results if r[2])
-            text += f"\nKupony rozliczone w tym kroku: {slip_wins} wygranych z {len(slip_results)}."
-        await interaction.response.send_message(text)
+            embed.add_field(
+                name="Kupony (AKO)",
+                value=f"Rozliczono {slip_wins} wygranych z {len(slip_results)} w tym kroku",
+                inline=True,
+            )
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot):
