@@ -13,7 +13,6 @@ AUTHORIZED_USER_IDS = {int(x.strip()) for x in _raw_ids.split(",") if x.strip().
 
 _raw_channel = os.getenv("BET_CHANNEL_ID", "").strip()
 BET_CHANNEL_ID = int(_raw_channel) if _raw_channel.isdigit() else None
-
 _raw_max_bet = os.getenv("MAX_BET", "").strip()
 MAX_BET = int(_raw_max_bet) if _raw_max_bet.isdigit() else None
 
@@ -169,6 +168,47 @@ class Betting(commands.Cog):
         if format_setow is not None:
             obstaw_value += f"\nNa wynik setowy: `/typy_setowe mecz:{match_id}`"
         embed.add_field(name="Jak obstawić", value=obstaw_value, inline=False)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="kurs_setowy", description="[Admin] Ustaw ręcznie kurs na konkretny wynik setowy")
+    @app_commands.describe(
+        mecz="ID meczu (zobacz /mecze)",
+        gracz="Imię gracza (dokładnie jak w /mecze)",
+        wynik="Wynik setowy, np. 2:0, 2:1, 3:0, 3:1, 3:2",
+        kurs="Kurs dla tej opcji",
+    )
+    @is_authorized()
+    async def kurs_setowy(self, interaction: discord.Interaction, mecz: int, gracz: str, wynik: str, kurs: float):
+        if kurs < 1.01:
+            await interaction.response.send_message("Kurs musi być co najmniej 1.01.", ephemeral=True)
+            return
+
+        match = await db.get_match(mecz)
+        if match is None:
+            await interaction.response.send_message("Nie ma meczu o takim ID.", ephemeral=True)
+            return
+        if gracz not in (match["player_a"], match["player_b"]):
+            await interaction.response.send_message(
+                f"Nie ma takiego gracza w tym meczu. Wybierz: {match['player_a']} lub {match['player_b']}",
+                ephemeral=True,
+            )
+            return
+
+        label = f"{gracz} {wynik}"
+        existing_odds = await db.get_score_market_odds(mecz, label)
+        await db.upsert_score_market(mecz, label, round(kurs, 2))
+
+        if match["best_of"] is None:
+            # oznacz mecz jako majacy niestandardowe (recznie dodane) zaklady setowe
+            await db.set_match_best_of(mecz, -1)
+
+        akcja = "Zaktualizowano" if existing_odds is not None else "Dodano"
+        embed = discord.Embed(
+            title=f"🎯  {akcja} kurs setowy",
+            description=f"**{label}** @ **{round(kurs, 2)}**",
+            color=discord.Color.from_rgb(230, 126, 34),
+        )
+        embed.set_footer(text=f"Zobacz wszystkie: /typy_setowe mecz:{mecz}")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="mecze", description="Lista meczów otwartych do obstawiania")
