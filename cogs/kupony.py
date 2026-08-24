@@ -48,11 +48,15 @@ class Kupony(commands.Cog):
         for leg in legs:
             combined *= leg["odds_at_pick"]
 
-        await interaction.response.send_message(
-            f"✅ Dodano do kuponu: **{gracz}** @ {picked_odds} (mecz #{mecz}).\n"
-            f"Kupon zawiera teraz **{len(legs)}** mecz(e/ów) — łączny kurs: **{round(combined, 2)}**.\n"
-            f"Zobacz kupon: `/kupon_pokaz` | Obstaw: `/kupon_obstaw kwota:100`"
+        embed = discord.Embed(
+            title="🎟️  Dodano do kuponu",
+            color=discord.Color.from_rgb(155, 89, 182),
         )
+        embed.add_field(name="Nowy typ", value=f"**{gracz}** @ {picked_odds} (mecz #{mecz})", inline=False)
+        embed.add_field(name="Meczy na kuponie", value=str(len(legs)), inline=True)
+        embed.add_field(name="Łączny kurs", value=f"**{round(combined, 2)}**", inline=True)
+        embed.set_footer(text="Zobacz: /kupon_pokaz  •  Obstaw: /kupon_obstaw kwota:100")
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="kupon_usun", description="Usuń mecz ze swojego kuponu")
     @app_commands.describe(mecz="ID meczu do usunięcia z kuponu")
@@ -84,20 +88,22 @@ class Kupony(commands.Cog):
             return
 
         combined = 1.0
-        lines = []
+        embed = discord.Embed(
+            title="🎟️  Twój kupon",
+            description=f"{len(legs)} mecz(e/ów) w środku",
+            color=discord.Color.from_rgb(155, 89, 182),
+        )
         for leg in legs:
             combined *= leg["odds_at_pick"]
-            lines.append(
-                f"#{leg['match_id']}: {leg['player_a']} vs {leg['player_b']} — "
-                f"typ: {leg['player_choice']} @ {leg['odds_at_pick']}"
+            embed.add_field(
+                name=f"#{leg['match_id']}: {leg['player_a']} vs {leg['player_b']}",
+                value=f"typ: **{leg['player_choice']}** @ {leg['odds_at_pick']}",
+                inline=False,
             )
         combined = round(combined, 2)
-
-        text = "```\n" + "\n".join(lines) + f"\n\nŁączny kurs: {combined}\n" + "```"
-        await interaction.response.send_message(
-            f"🎟️ **Twój kupon ({len(legs)} mecz(e/ów))**\n{text}\n"
-            f"Obstaw: `/kupon_obstaw kwota:100`"
-        )
+        embed.add_field(name="Łączny kurs", value=f"**{combined}**", inline=False)
+        embed.set_footer(text="Obstaw: /kupon_obstaw kwota:100")
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="kupon_obstaw", description="Zatwierdź i obstaw swój kupon")
     @app_commands.describe(kwota="Ile stawiasz na cały kupon")
@@ -114,10 +120,14 @@ class Kupony(commands.Cog):
 
         slip = (await db.get_user_slips(interaction.user.id, limit=1))[0]
         potential = int(round(slip["stake"] * slip["combined_odds"]))
-        await interaction.response.send_message(
-            f"✅ Kupon obstawiony! Stawka: **{format_money(kwota)}**, łączny kurs: **{slip['combined_odds']}**.\n"
-            f"Możliwa wygrana: **{format_money(potential)}**."
+        embed = discord.Embed(
+            title="✅  Kupon obstawiony!",
+            color=discord.Color.from_rgb(46, 204, 113),
         )
+        embed.add_field(name="Stawka", value=format_money(kwota), inline=True)
+        embed.add_field(name="Łączny kurs", value=str(slip["combined_odds"]), inline=True)
+        embed.add_field(name="Możliwa wygrana", value=f"**{format_money(potential)}**", inline=True)
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="kupon_anuluj", description="Anuluj (wyczyść) swój niezatwierdzony kupon")
     async def kupon_anuluj(self, interaction: discord.Interaction):
@@ -135,7 +145,10 @@ class Kupony(commands.Cog):
             await interaction.response.send_message("Nie masz jeszcze żadnych obstawionych kuponów.")
             return
 
-        lines = []
+        embed = discord.Embed(
+            title="🎟️  Historia Twoich kuponów",
+            color=discord.Color.from_rgb(155, 89, 182),
+        )
         for slip in slips:
             legs = await db.get_slip_legs(slip["id"])
             leg_desc = ", ".join(f"{l['player_choice']}" for l in legs)
@@ -144,13 +157,15 @@ class Kupony(commands.Cog):
             else:
                 any_lost = any(l["result"] == "lost" for l in legs)
                 status = "❌ przegrany" if any_lost else "✅ wygrany"
-            lines.append(
-                f"Kupon #{slip['id']} ({len(legs)} mecz(e/ów): {leg_desc}) — "
-                f"stawka {format_money(slip['stake'])} @ {slip['combined_odds']} — {status}"
+            embed.add_field(
+                name=f"Kupon #{slip['id']} — {status}",
+                value=(
+                    f"{len(legs)} mecz(e/ów): {leg_desc}\n"
+                    f"stawka {format_money(slip['stake'])} @ {slip['combined_odds']}"
+                ),
+                inline=False,
             )
-
-        text = "```\n" + "\n".join(lines) + "\n```"
-        await interaction.response.send_message(text)
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot):
