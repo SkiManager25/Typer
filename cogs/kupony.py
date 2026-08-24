@@ -4,6 +4,7 @@ from discord.ext import commands
 
 import database as db
 from currency import format_money
+from cogs.betting import check_max_bet
 
 
 class Kupony(commands.Cog):
@@ -110,6 +111,11 @@ class Kupony(commands.Cog):
     async def kupon_obstaw(self, interaction: discord.Interaction, kwota: int):
         if kwota <= 0:
             await interaction.response.send_message("Kwota musi być dodatnia.", ephemeral=True)
+            return
+
+        limit_error = check_max_bet(kwota)
+        if limit_error:
+            await interaction.response.send_message(limit_error, ephemeral=True)
             return
 
         await db.get_or_create_user(interaction.user.id, str(interaction.user))
