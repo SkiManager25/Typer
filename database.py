@@ -156,6 +156,20 @@ async def get_match(match_id: int):
             return await cur.fetchone()
 
 
+async def find_open_match_by_players(player_a: str, player_b: str):
+    """Szuka juz istniejacego OTWARTEGO meczu tych samych dwoch graczy
+    (niezaleznie od kolejnosci), zeby unikac duplikatow przy ponownych probach."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM matches WHERE status = 'open' AND
+               ((player_a = ? AND player_b = ?) OR (player_a = ? AND player_b = ?))
+               ORDER BY id DESC LIMIT 1""",
+            (player_a, player_b, player_b, player_a),
+        ) as cur:
+            return await cur.fetchone()
+
+
 async def get_open_matches():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -485,20 +499,3 @@ async def settle_score_bets(match_id: int, winner: str, actual_score: str | None
                 # brak dokladnego wyniku - zwrot stawki
                 await db.execute(
                     "UPDATE users SET balance = balance + ? WHERE discord_id = ?",
-                    (bet["amount"], bet["discord_id"]),
-                )
-                await db.execute("UPDATE score_bets SET settled = 1 WHERE id = ?", (bet["id"],))
-                results.append((bet["discord_id"], False, bet["amount"], bet["amount"], True))
-            else:
-                won = bet["label"] == correct_label
-                payout = int(round(bet["amount"] * bet["odds"])) if won else 0
-                if won:
-                    await db.execute(
-                        "UPDATE users SET balance = balance + ? WHERE discord_id = ?",
-                        (payout, bet["discord_id"]),
-                    )
-                await db.execute("UPDATE score_bets SET settled = 1 WHERE id = ?", (bet["id"],))
-                results.append((bet["discord_id"], won, payout, bet["amount"], False))
-
-        await db.commit()
-        return results
