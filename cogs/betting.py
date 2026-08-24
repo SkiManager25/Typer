@@ -8,11 +8,18 @@ import database as db
 from odds import calculate_odds, calculate_score_markets
 from currency import format_money
 
+# ID Discorda osob uprawnionych do dodawania/rozstrzygania meczy.
+# Ustawiane zmienna srodowiskowa MATCH_ADMIN_IDS, oddzielone przecinkami, np:
+# MATCH_ADMIN_IDS=123456789012345678,987654321098765432
 _raw_ids = os.getenv("MATCH_ADMIN_IDS", "")
 AUTHORIZED_USER_IDS = {int(x.strip()) for x in _raw_ids.split(",") if x.strip().isdigit()}
 
+# Opcjonalny kanal, na ktorym mozna dodawac mecze (ID kanalu Discorda).
+# Ustawiane zmienna srodowiskowa BET_CHANNEL_ID. Jesli pusta - brak ograniczenia.
 _raw_channel = os.getenv("BET_CHANNEL_ID", "").strip()
 BET_CHANNEL_ID = int(_raw_channel) if _raw_channel.isdigit() else None
+
+# Opcjonalny maksymalny zaklad (pojedynczy i kupon). Ustawiane zmienna MAX_BET.
 _raw_max_bet = os.getenv("MAX_BET", "").strip()
 MAX_BET = int(_raw_max_bet) if _raw_max_bet.isdigit() else None
 
@@ -24,6 +31,7 @@ class WrongChannelError(app_commands.CheckFailure):
 def is_authorized():
     async def predicate(interaction: discord.Interaction) -> bool:
         if not AUTHORIZED_USER_IDS:
+            # jesli nikt nie zostal wskazany, awaryjnie zostaje wymog Administratora
             return interaction.user.guild_permissions.administrator
         return interaction.user.id in AUTHORIZED_USER_IDS
     return app_commands.check(predicate)
