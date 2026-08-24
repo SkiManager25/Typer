@@ -2,7 +2,7 @@ import aiosqlite
 
 DB_PATH = "typerka.db"
 
-START_BALANCE = 35 
+START_BALANCE = 35
 
 
 async def init_db():
@@ -39,7 +39,6 @@ async def init_db():
                 FOREIGN KEY(match_id) REFERENCES matches(id)
             )
         """)
-        # Kupony (AKO) - jeden zaklad obejmujacy kilka meczow, kursy sie mnoza
         await db.execute("""
             CREATE TABLE IF NOT EXISTS slips (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -221,7 +220,7 @@ async def settle_match(match_id: int, winner: str):
             )
             affected_slip_ids.add(leg["slip_id"])
 
-        slip_results = []
+        slip_results = [] 
         for slip_id in affected_slip_ids:
             async with db.execute(
                 "SELECT * FROM slips WHERE id = ?", (slip_id,)
@@ -247,21 +246,11 @@ async def settle_match(match_id: int, winner: str):
                     "UPDATE slips SET status = 'settled' WHERE id = ?", (slip_id,)
                 )
                 slip_results.append((slip["discord_id"], slip_id, True, payout, slip["stake"]))
+            # inaczej: nadal sa nogi 'pending' - czekamy na kolejne mecze
 
         await db.commit()
         return results, slip_results
 
-
-async def get_leaderboard(limit: int = 10):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM users ORDER BY balance DESC LIMIT ?", (limit,)
-        ) as cur:
-            return await cur.fetchall()
-
-
-# ---------- KUPONY (AKO) ----------
 
 async def get_draft_slip(discord_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -336,6 +325,7 @@ async def place_slip(discord_id: int, stake: int) -> tuple[bool, str]:
     if len(legs) < 2:
         return False, "Kupon musi mieć co najmniej 2 mecze (dla 1 meczu użyj /typuj)."
 
+    # sprawdz czy wszystkie mecze wciaz otwarte
     for leg in legs:
         match = await get_match(leg["match_id"])
         if match is None or match["status"] != "open":
@@ -343,7 +333,8 @@ async def place_slip(discord_id: int, stake: int) -> tuple[bool, str]:
 
     balance = await get_balance(discord_id)
     if balance is None or balance < stake:
-        return False, f"Za mało kasy. Masz ${balance or 0:,}, chcesz postawić ${stake:,}."
+        from currency import format_money
+        return False, f"Za mało kasy. Masz {format_money(balance or 0)}, chcesz postawić {format_money(stake)}."
 
     combined_odds = 1.0
     for leg in legs:
@@ -370,5 +361,14 @@ async def get_user_slips(discord_id: int, limit: int = 10):
             """SELECT * FROM slips WHERE discord_id = ? AND status != 'draft'
                ORDER BY id DESC LIMIT ?""",
             (discord_id, limit),
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def get_leaderboard(limit: int = 10):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM users ORDER BY balance DESC LIMIT ?", (limit,)
         ) as cur:
             return await cur.fetchall()
