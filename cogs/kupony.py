@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database as db
+from currency import format_money
 
 
 class Kupony(commands.Cog):
@@ -114,8 +115,8 @@ class Kupony(commands.Cog):
         slip = (await db.get_user_slips(interaction.user.id, limit=1))[0]
         potential = int(round(slip["stake"] * slip["combined_odds"]))
         await interaction.response.send_message(
-            f"✅ Kupon obstawiony! Stawka: **${kwota:,}**, łączny kurs: **{slip['combined_odds']}**.\n"
-            f"Możliwa wygrana: **${potential:,}**."
+            f"✅ Kupon obstawiony! Stawka: **{format_money(kwota)}**, łączny kurs: **{slip['combined_odds']}**.\n"
+            f"Możliwa wygrana: **{format_money(potential)}**."
         )
 
     @app_commands.command(name="kupon_anuluj", description="Anuluj (wyczyść) swój niezatwierdzony kupon")
@@ -145,7 +146,7 @@ class Kupony(commands.Cog):
                 status = "❌ przegrany" if any_lost else "✅ wygrany"
             lines.append(
                 f"Kupon #{slip['id']} ({len(legs)} mecz(e/ów): {leg_desc}) — "
-                f"stawka ${slip['stake']:,} @ {slip['combined_odds']} — {status}"
+                f"stawka {format_money(slip['stake'])} @ {slip['combined_odds']} — {status}"
             )
 
         text = "```\n" + "\n".join(lines) + "\n```"
